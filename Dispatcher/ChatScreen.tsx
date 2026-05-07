@@ -11,7 +11,7 @@ import {
 
 
 
-export default function ChatScreen({ route }) {
+export default function ChatScreen({ route } : any) {
     const { sosId, currentUserId } = route.params;
 
     const [messages, setMessages] = useState<any[]>([]);
@@ -65,7 +65,7 @@ export default function ChatScreen({ route }) {
         setText('');
     };
 
-    const renderItem = ({ item } : any) => {
+    const renderItem = ({ item }: any) => {
         const isMine = item.sender_id === currentUserId;
 
         return (
