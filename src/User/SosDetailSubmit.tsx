@@ -3,65 +3,90 @@ import { useAuth } from "@/src/Context/AuthContext";
 import { Ionicons } from "@expo/vector-icons";
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import * as Network from 'expo-network'; // Thư viện kiểm tra mạng
+import * as SMS from 'expo-sms'; // Thư viện gửi tin nhắn
 import React, { useState } from "react";
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
 export default function SosDetailSubmit({ route, navigation }: any) {
-  const { emergencyType } = route.params;
-  const { user } = useAuth();
+  const { emergencyType } = route.params; // Lấy loại khẩn cấp từ trang trước
+  const { user, profile } = useAuth();    // Lấy thông tin người dùng từ AuthContext
   const [description, setDescription] = useState("");
   const [imageUri, setImageUri] = useState<string | null>(null);
-  const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Hàm chụp ảnh hiện trường
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') return Alert.alert("Lỗi", "Cần quyền camera để báo cáo sự cố.");
-    let result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.4, base64: true }); // Giảm chất lượng ảnh xuống 0.4 để upload nhanh hơn
+    let result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.4 });
     if (!result.canceled) {
       setImageUri(result.assets[0].uri);
-      setImageBase64(result.assets[0].base64 || null);
     }
   };
 
+  // HÀM XỬ LÝ GỬI CỨU HỘ CHÍNH
   const handleSend = async () => {
-  setLoading(true);
-  try {
-    // 1. Phải lấy tọa độ trước
-    let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-    const lat = location.coords.latitude;
-    const lng = location.coords.longitude;
-
-    // 2. Lấy địa chỉ từ tọa độ (Reverse Geocode)
-    let addressDisplay = "Vị trí GPS: " + lat.toFixed(4) + ", " + lng.toFixed(4);
+    setLoading(true);
     try {
-      let reverseGeocode = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
-      if (reverseGeocode.length > 0) {
-        const loc = reverseGeocode[0];
-        addressDisplay = `${loc.streetNumber || ''} ${loc.street || ''}, ${loc.region || ''}`.trim();
+      // 1. Lấy tọa độ GPS chính xác
+      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const lat = location.coords.latitude;
+      const lng = location.coords.longitude;
+
+      // 2. Kiểm tra trạng thái kết nối Internet
+      const networkState = await Network.getNetworkStateAsync();
+      const isOnline = networkState.isConnected && networkState.isInternetReachable;
+
+      if (isOnline) {
+        // --- TRƯỜNG HỢP CÓ MẠNG: GỬI LÊN DATABASE SUPABASE ---
+        let addressDisplay = "Vị trí GPS: " + lat.toFixed(4) + ", " + lng.toFixed(4);
+        try {
+          let reverseGeocode = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+          if (reverseGeocode.length > 0) {
+            const loc = reverseGeocode[0];
+            addressDisplay = `${loc.streetNumber || ''} ${loc.street || ''}, ${loc.region || ''}`.trim();
+          }
+        } catch (e) { console.log("Lỗi lấy địa chỉ, dùng tọa độ"); }
+
+        const { data, error } = await supabase.from("sos_requests").insert([{ 
+          emergency_type: emergencyType, 
+          description, 
+          address: addressDisplay, 
+          latitude: lat, 
+          longitude: lng, 
+          user_id: user?.id, 
+          status: "pending"
+        }]).select().single();
+
+        if (error) throw error;
+        navigation.replace("SosTracking", { requestId: data.id });
+
+      } else {
+        // --- TRƯỜNG HỢP KHÔNG CÓ MẠNG: GỬI QUA TIN NHẮN SMS ---
+        const isAvailable = await SMS.isAvailableAsync();
+        if (isAvailable) {
+          const mapLink = `https://www.google.com/maps?q=${lat},${lng}`;
+          const smsBody = `[SOS KHẨN CẤP]\nLoại: ${emergencyType}\nNgười gửi: ${profile?.full_name || "Nạn nhân"}\nVị trí: ${mapLink}\nMô tả: ${description || "Cần cứu trợ khẩn cấp!"}`;
+
+          // Số điện thoại của tổng đài hoặc điều phối viên (Công hãy thay số này)
+          const { result } = await SMS.sendSMSAsync(['056500179'], smsBody);
+          
+          if (result === 'sent') {
+            Alert.alert("Thành công", "Đã gửi tín hiệu SOS qua tin nhắn SMS do không có mạng.");
+            navigation.navigate("UserHome");
+          }
+        } else {
+          Alert.alert("Lỗi", "Thiết bị của bạn không hỗ trợ tính năng gửi SMS.");
+        }
       }
-    } catch (e) { console.log("Lỗi lấy địa chỉ, dùng tọa độ thay thế"); }
 
-    // 3. Gửi lên database - Đảm bảo lat/lng không được null
-    const { data, error } = await supabase.from("sos_requests").insert([{ 
-      emergency_type: emergencyType, 
-      description, 
-      address: addressDisplay, // Gửi địa chỉ đã xác định được
-      latitude: lat, 
-      longitude: lng, 
-      user_id: user?.id, 
-      status: "pending"
-    }]).select().single();
-
-    if (error) throw error;
-    navigation.replace("SosTracking", { requestId: data.id });
-
-  } catch (err: any) {
-    Alert.alert("Lỗi", "Không thể lấy tọa độ. Hãy bật GPS.");
-  } finally {
-    setLoading(false);
-  }
-};
+    } catch (err: any) {
+      Alert.alert("Lỗi", "Không thể xác định vị trí. Vui lòng bật GPS.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={{ padding: 25 }}>
@@ -73,18 +98,33 @@ export default function SosDetailSubmit({ route, navigation }: any) {
       </View>
 
       <Text style={styles.label}>Mô tả tình hình</Text>
-      <TextInput style={styles.input} placeholder="Nêu ngắn gọn vấn đề..." multiline value={description} onChangeText={setDescription} />
+      <TextInput 
+        style={styles.input} 
+        placeholder="Nêu ngắn gọn vấn đề (ví dụ: bị kẹt trong đám cháy, tai nạn xe...)" 
+        multiline 
+        value={description} 
+        onChangeText={setDescription} 
+      />
 
       <Text style={styles.label}>Hình ảnh minh chứng</Text>
       <TouchableOpacity style={styles.imageBtn} onPress={takePhoto}>
         {imageUri ? <Image source={{ uri: imageUri }} style={styles.preview} /> : (
-          <View style={{ alignItems: 'center' }}><Ionicons name="camera" size={40} color="#94A3B8" /><Text style={styles.imageText}>Chụp ảnh hiện trường</Text></View>
+          <View style={{ alignItems: 'center' }}>
+            <Ionicons name="camera" size={40} color="#94A3B8" />
+            <Text style={styles.imageText}>Chụp ảnh hiện trường</Text>
+          </View>
         )}
       </TouchableOpacity>
 
-      <TouchableOpacity style={[styles.submitBtn, loading && { opacity: 0.7 }]} onPress={handleSend} disabled={loading}>
+      <TouchableOpacity 
+        style={[styles.submitBtn, loading && { opacity: 0.7 }]} 
+        onPress={handleSend} 
+        disabled={loading}
+      >
         {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.submitText}>GỬI CỨU HỘ NGAY</Text>}
       </TouchableOpacity>
+      
+      <Text style={styles.note}>* Hệ thống sẽ tự động gửi tin nhắn SMS nếu không có kết nối internet.</Text>
     </ScrollView>
   );
 }
@@ -100,5 +140,6 @@ const styles = StyleSheet.create({
   imageText: { color: '#94A3B8', marginTop: 10, fontWeight: '700' },
   preview: { width: '100%', height: '100%', borderRadius: 32 },
   submitBtn: { backgroundColor: '#EF4444', height: 70, borderRadius: 25, justifyContent: 'center', alignItems: 'center', elevation: 8 },
-  submitText: { color: '#fff', fontWeight: '900', fontSize: 18, letterSpacing: 1 }
+  submitText: { color: '#fff', fontWeight: '900', fontSize: 18, letterSpacing: 1 },
+  note: { color: '#94A3B8', fontSize: 12, textAlign: 'center', marginTop: 15, fontStyle: 'italic' }
 });

@@ -14,7 +14,6 @@ import ChatScreen from "../Services/ChatScreen";
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
 
-// Stack dành riêng cho mục Quản lý Yêu cầu (để nhấn vào xem chi tiết được)
 function RequestStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -30,7 +29,7 @@ export default function DispatcherNavigation() {
     <Tab.Navigator
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: "#1BA7A6", // Màu xanh đặc trưng của Dispatcher
+        tabBarActiveTintColor: "#1BA7A6", 
         tabBarInactiveTintColor: "#9CA3AF",
         tabBarStyle: { height: 64, paddingBottom: 10, paddingTop: 10, borderTopWidth: 0, elevation: 10 },
       }}
