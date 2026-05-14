@@ -1,7 +1,7 @@
 import "react-native-url-polyfill/auto";
 
-import { AuthProvider } from "@/Context/AuthContext";
-import RootNavigation from "@/Context/RootNavigation";
+import { AuthProvider } from "@/src/Context/AuthContext";
+import RootNavigation from "@/src/Context/RootNavigation";
 
 export default function RootLayout() {
   return (
