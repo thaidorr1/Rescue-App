@@ -11,6 +11,7 @@ import SosTracking from "@/src/User/SosTracking";
 import UserHistory from "@/src/User/UserHistory";
 import UserHome from "@/src/User/UserHome";
 import UserProfile from "@/src/User/UserProfile";
+import RatingScreen from "../Services/RatingScreen";
 import VolunteerInbox from "../Services/VolunteerInbox";
 import VolunteerVerification from "../Services/VolunteerVerification";
 
@@ -27,6 +28,7 @@ function HomeStack() {
       <Stack.Screen name="ChatScreen" component={ChatScreen} />
       <Stack.Screen name="VolunteerVerification" component={VolunteerVerification} />
       <Stack.Screen name="VolunteerInbox" component={VolunteerInbox} />
+      <Stack.Screen name="RatingScreen" component={RatingScreen} />
     </Stack.Navigator>
   );
 }

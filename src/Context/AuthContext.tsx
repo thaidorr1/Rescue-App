@@ -2,13 +2,13 @@ import { supabase } from "@/lib/supabase";
 import { Session, User } from "@supabase/supabase-js";
 import React, { createContext, ReactNode, useContext, useEffect, useState } from "react";
 
-// Định nghĩa kiểu dữ liệu Profile (Đã xóa expo_push_token)
+// 1. THÊM 'volunteer' VÀO KIỂU DỮ LIỆU ROLE
 type Profile = {
   id: string;
   full_name: string | null;
   phone: string | null;
   avatar_url: string | null;
-  role: "user" | "rescue_team" | "dispatcher";
+  role: "user" | "volunteer" | "rescue_team" | "dispatcher"; 
 };
 
 type AuthContextType = {
@@ -34,7 +34,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Hàm lấy thông tin người dùng từ bảng profiles
   const getProfile = async (userId: string) => {
     try {
       const { data, error } = await supabase
@@ -54,6 +53,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // 2. HÀM NÀY GIÚP CẬP NHẬT GIAO DIỆN NGAY LẬP TỨC KHI ĐỔI ROLE
   const refreshProfile = async () => {
     if (session?.user?.id) await getProfile(session.user.id);
   };
@@ -69,7 +69,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
-    // 1. Kiểm tra session hiện tại khi mở app
     const initAuth = async () => {
       const { data } = await supabase.auth.getSession();
       setSession(data.session);
@@ -81,7 +80,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     initAuth();
 
-    // 2. Lắng nghe thay đổi trạng thái đăng nhập (Login/Logout)
     const { data: listener } = supabase.auth.onAuthStateChange(
       async (_event, currentSession) => {
         setSession(currentSession);

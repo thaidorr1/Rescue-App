@@ -22,7 +22,13 @@ export default function SosTracking({ route, navigation }: any) {
   const [rescuerLocation, setRescuerLocation] = useState<any>(null);
 
   const fetchInitialData = async () => {
-    const { data } = await supabase.from("sos_requests").select(`*, assignments(*, rescue_teams(*))`).eq("id", requestId).single();
+    // Lấy thông tin chi tiết vụ SOS và các bảng liên quan
+    const { data } = await supabase
+      .from("sos_requests")
+      .select(`*, assignments(*, rescue_teams(*))`)
+      .eq("id", requestId)
+      .single();
+
     if (data) {
       setSosDetail(data);
       const rescuerId = data.assignments?.[0]?.rescue_team_id;
@@ -32,23 +38,35 @@ export default function SosTracking({ route, navigation }: any) {
   };
 
   const fetchRescuerLocation = async (id: string) => {
+    // Lấy tọa độ hiện tại của đội cứu hộ để hiển thị trên bản đồ
     const { data } = await supabase.from("profiles").select("current_lat, current_lng").eq("id", id).maybeSingle();
     if (data?.current_lat) setRescuerLocation({ latitude: data.current_lat, longitude: data.current_lng });
   };
 
   useEffect(() => {
     fetchInitialData();
-    const subscription = supabase.channel(`tracking_${requestId}`).on("postgres_changes", { event: "UPDATE", schema: "public", table: "sos_requests", filter: `id=eq.${requestId}` }, (payload) => {
-          if (payload.new.status === "arrived") triggerLocalNotification("🚑 CỨU HỘ ĐÃ ĐẾN!", "Đội cứu hộ đã có mặt.");
+    // Lắng nghe thay đổi trạng thái thời gian thực
+    const subscription = supabase.channel(`tracking_${requestId}`).on("postgres_changes", { 
+      event: "UPDATE", 
+      schema: "public", 
+      table: "sos_requests", 
+      filter: `id=eq.${requestId}` 
+    }, (payload) => {
+          // Bắn thông báo khi cứu hộ xác nhận đã đến
+          if (payload.new.status === "arrived") {
+            triggerLocalNotification("🚑 CỨU HỘ ĐÃ ĐẾN!", "Đội cứu hộ đã có mặt tại vị trí của bạn.");
+          }
           fetchInitialData(); 
     }).subscribe();
+    
     return () => { supabase.removeChannel(subscription); };
   }, [requestId]);
 
   if (loading) return <ActivityIndicator style={{ flex: 1 }} color="#FF6B35" />;
 
-  const isAccepted = sosDetail?.status !== "pending" && sosDetail?.status !== "completed";
-  const isCompleted = sosDetail?.status === "completed";
+  const status = sosDetail?.status;
+  const isAccepted = status === "assigned" || status === "arrived";
+  const isCompleted = status === "completed";
   const guide = AI_FIRST_AID_GUIDE[sosDetail?.emergency_type] || AI_FIRST_AID_GUIDE['Default'];
 
   return (
@@ -61,19 +79,30 @@ export default function SosTracking({ route, navigation }: any) {
       </View>
 
       <View style={styles.mapBox}>
-        <MapView provider={PROVIDER_GOOGLE} style={styles.map} initialRegion={{ latitude: sosDetail?.latitude || 16.0544, longitude: sosDetail?.longitude || 108.2022, latitudeDelta: 0.01, longitudeDelta: 0.01 }}>
-          <Marker coordinate={{ latitude: sosDetail.latitude, longitude: sosDetail.longitude }}>
-            <View style={styles.userDot} />
-          </Marker>
-          {isAccepted && rescuerLocation && (
-            <Marker coordinate={rescuerLocation}>
-              <View style={styles.rescueMarker}><Ionicons name="medical" size={16} color="#FFF" /></View>
+        {sosDetail?.latitude && (
+          <MapView 
+            provider={PROVIDER_GOOGLE} 
+            style={styles.map} 
+            initialRegion={{ 
+              latitude: sosDetail.latitude, 
+              longitude: sosDetail.longitude, 
+              latitudeDelta: 0.01, 
+              longitudeDelta: 0.01 
+            }}
+          >
+            <Marker coordinate={{ latitude: sosDetail.latitude, longitude: sosDetail.longitude }}>
+              <View style={styles.userDot} />
             </Marker>
-          )}
-        </MapView>
+            {isAccepted && rescuerLocation && (
+              <Marker coordinate={rescuerLocation}>
+                <View style={styles.rescueMarker}><Ionicons name="medical" size={16} color="#FFF" /></View>
+              </Marker>
+            )}
+          </MapView>
+        )}
       </View>
 
-      {/* THẺ AI HỖ TRỢ SƠ CỨU */}
+      {/* THẺ AI HỖ TRỢ SƠ CỨU - Hiện khi có đội nhận hoặc đã đến */}
       {isAccepted && (
         <View style={[styles.aiCard, { borderColor: guide.color }]}>
           <View style={styles.aiHeader}>
@@ -86,10 +115,16 @@ export default function SosTracking({ route, navigation }: any) {
         </View>
       )}
 
-      {/* STATUS BOX - ĐÃ FIX LỖI DUPLICATE TRONG ẢNH */}
+      {/* STATUS BOX - ĐÃ CẬP NHẬT LOGIC HIỂN THỊ */}
       <View style={styles.statusBox}>
-        <Text style={[styles.statusText, { color: isCompleted ? '#10B981' : '#FF6B35' }]}>
-          {isCompleted ? "Nhiệm vụ hoàn tất" : isAccepted ? "Đội cứu hộ đang đến" : "Đang tìm đội cứu trợ..."}
+        <Text style={[
+          styles.statusText, 
+          { color: isCompleted ? '#10B981' : (status === 'pending' ? '#94A3B8' : '#FF6B35') }
+        ]}>
+          {isCompleted ? "Nhiệm vụ hoàn tất" : 
+           status === "arrived" ? "Đội cứu hộ đã đến" : // SỬA TẠI ĐÂY
+           status === "assigned" ? "Đội cứu hộ đang đến" : 
+           "Đang tìm đội cứu trợ..."}
         </Text>
         <Text style={styles.idText}>Mã vụ: {requestId.slice(0, 8).toUpperCase()}</Text>
 
@@ -108,13 +143,17 @@ export default function SosTracking({ route, navigation }: any) {
         )}
       </View>
 
+      {/* THÔNG TIN ĐỘI HỖ TRỢ */}
       {isAccepted && (
         <View style={styles.teamCard}>
           <View style={{ flex: 1 }}>
             <Text style={styles.teamLabel}>Đội hỗ trợ:</Text>
-            <Text style={styles.teamName}>{sosDetail?.assignments?.[0]?.rescue_teams?.team_name}</Text>
+            <Text style={styles.teamName}>{sosDetail?.assignments?.[0]?.rescue_teams?.team_name || "Đang cập nhật..."}</Text>
           </View>
-          <TouchableOpacity style={styles.chatBtn} onPress={() => navigation.navigate("ChatScreen", { requestId, receiverName: "Cứu hộ" })}>
+          <TouchableOpacity 
+            style={styles.chatBtn} 
+            onPress={() => navigation.navigate("ChatScreen", { requestId, receiverName: "Cứu hộ" })}
+          >
             <Ionicons name="chatbubbles" size={24} color="#FFF" />
           </TouchableOpacity>
         </View>
@@ -142,16 +181,7 @@ const styles = StyleSheet.create({
   statusBox: { marginHorizontal: 25, backgroundColor: '#FFF', borderRadius: 28, padding: 25, alignItems: 'center', elevation: 3 },
   statusText: { fontSize: 18, fontWeight: '900' },
   idText: { fontSize: 10, color: '#94A3B8', marginTop: 5, fontWeight: '800' },
-  rateBtn: { 
-    backgroundColor: '#FFB800', 
-    flexDirection: 'row',
-    paddingVertical: 12, 
-    paddingHorizontal: 25, 
-    borderRadius: 18, 
-    marginTop: 20,
-    alignItems: 'center',
-    elevation: 4
-  },
+  rateBtn: { backgroundColor: '#FFB800', flexDirection: 'row', paddingVertical: 12, paddingHorizontal: 25, borderRadius: 18, marginTop: 20, alignItems: 'center', elevation: 4 },
   rateText: { color: '#FFF', fontWeight: '900', fontSize: 13 },
   teamCard: { margin: 25, backgroundColor: '#0F172A', borderRadius: 32, padding: 20, flexDirection: 'row', alignItems: 'center' },
   teamLabel: { color: '#94A3B8', fontSize: 12 },

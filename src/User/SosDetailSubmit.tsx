@@ -1,11 +1,8 @@
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/src/Context/AuthContext";
 import { Ionicons } from "@expo/vector-icons";
-import { decode } from 'base64-arraybuffer';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import * as Network from 'expo-network';
-import * as SMS from 'expo-sms';
 import React, { useState } from "react";
 import { ActivityIndicator, Alert, Image, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from "react-native";
 
@@ -20,7 +17,7 @@ export default function SosDetailSubmit({ route, navigation }: any) {
   const takePhoto = async () => {
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
     if (status !== 'granted') return Alert.alert("Lỗi", "Cần quyền camera để báo cáo sự cố.");
-    let result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.5, base64: true });
+    let result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.4, base64: true }); // Giảm chất lượng ảnh xuống 0.4 để upload nhanh hơn
     if (!result.canceled) {
       setImageUri(result.assets[0].uri);
       setImageBase64(result.assets[0].base64 || null);
@@ -28,85 +25,43 @@ export default function SosDetailSubmit({ route, navigation }: any) {
   };
 
   const handleSend = async () => {
-    setLoading(true);
-    let addressDisplay = "Ngoại tuyến (Chỉ có GPS)";
-    let coords = { latitude: 0, longitude: 0 };
+  setLoading(true);
+  try {
+    // 1. Phải lấy tọa độ trước
+    let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+    const lat = location.coords.latitude;
+    const lng = location.coords.longitude;
 
+    // 2. Lấy địa chỉ từ tọa độ (Reverse Geocode)
+    let addressDisplay = "Vị trí GPS: " + lat.toFixed(4) + ", " + lng.toFixed(4);
     try {
-      // 1. LẤY VỊ TRÍ & KIỂM TRA MẠNG
-      const network = await Network.getNetworkStateAsync();
-      const hasInternet = network.isConnected && network.isInternetReachable;
-
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        setLoading(false);
-        return Alert.alert("Lỗi", "Vui lòng cấp quyền vị trí.");
+      let reverseGeocode = await Location.reverseGeocodeAsync({ latitude: lat, longitude: lng });
+      if (reverseGeocode.length > 0) {
+        const loc = reverseGeocode[0];
+        addressDisplay = `${loc.streetNumber || ''} ${loc.street || ''}, ${loc.region || ''}`.trim();
       }
-      
-      let location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
-      coords = { latitude: location.coords.latitude, longitude: location.coords.longitude };
+    } catch (e) { console.log("Lỗi lấy địa chỉ, dùng tọa độ thay thế"); }
 
-      if (hasInternet) {
-        try {
-          let reverseGeocode = await Location.reverseGeocodeAsync(coords);
-          if (reverseGeocode.length > 0) {
-            const loc = reverseGeocode[0];
-            addressDisplay = `${loc.streetNumber || ''} ${loc.street || ''}, ${loc.region || ''}`.trim();
-          }
-        } catch (e) {}
-      }
+    // 3. Gửi lên database - Đảm bảo lat/lng không được null
+    const { data, error } = await supabase.from("sos_requests").insert([{ 
+      emergency_type: emergencyType, 
+      description, 
+      address: addressDisplay, // Gửi địa chỉ đã xác định được
+      latitude: lat, 
+      longitude: lng, 
+      user_id: user?.id, 
+      status: "pending"
+    }]).select().single();
 
-      const mapLink = `https://www.google.com/maps?q=${coords.latitude},${coords.longitude}`;
-      const smsContent = `🚨 SOS: Yêu cầu hỗ trợ ${emergencyType}.\nVị trí: ${mapLink}\nMô tả: ${description}`;
+    if (error) throw error;
+    navigation.replace("SosTracking", { requestId: data.id });
 
-      // 2. XỬ LÝ NGOẠI TUYẾN
-      if (!hasInternet) {
-        setLoading(false);
-        return Alert.alert("Ngoại tuyến", "Gửi tin báo qua SMS cho tổng đài?", [
-          { text: "Gửi", onPress: async () => await SMS.sendSMSAsync(["056500179"], smsContent) }
-        ]);
-      }
-
-      // 3. UPLOAD ẢNH MINH CHỨNG
-      let publicUrl = null;
-      if (imageBase64) {
-        const fileName = `SOS_${Date.now()}.jpg`;
-        const { error: uploadError } = await supabase.storage.from('evidence').upload(`images/${fileName}`, decode(imageBase64), { contentType: 'image/jpeg' });
-        if (!uploadError) publicUrl = supabase.storage.from('evidence').getPublicUrl(`images/${fileName}`).data.publicUrl;
-      }
-
-      // 4. LƯU VÀO DATABASE - ĐÃ GỠ BỎ RÀNG BUỘC CẬP NHẬT HỒ SƠ
-      const { data, error } = await supabase.from("sos_requests").insert([{ 
-        emergency_type: emergencyType, 
-        description, 
-        image_url: publicUrl, 
-        address: addressDisplay, 
-        latitude: coords.latitude, 
-        longitude: coords.longitude, 
-        user_id: user?.id || null, // Chấp nhận gửi kể cả khi không có profile
-        status: "pending" 
-      }]).select().single();
-
-      if (error) throw error; // Chỉ báo lỗi nếu database thực sự gặp sự cố
-
-      // 5. VÒNG TRÒN AN TOÀN & TÌNH NGUYỆN VIÊN
-      if (user?.id) {
-        const { data: contacts } = await supabase.from("emergency_contacts").select("phone_number").eq("user_id", user.id);
-        if (contacts && contacts.length > 0) {
-          const phoneNumbers = contacts.map(c => c.phone_number);
-          if (await SMS.isAvailableAsync()) await SMS.sendSMSAsync(phoneNumbers, smsContent);
-        }
-      }
-
-      await supabase.rpc('get_nearby_volunteers', { target_lat: coords.latitude, target_lng: coords.longitude, radius_km: 3.0 });
-
-      navigation.replace("SosTracking", { requestId: data.id });
-    } catch (err: any) {
-      Alert.alert("Lỗi hệ thống", "Không thể gửi yêu cầu SOS. Vui lòng thử lại.");
-    } finally {
-      setLoading(false);
-    }
-  };
+  } catch (err: any) {
+    Alert.alert("Lỗi", "Không thể lấy tọa độ. Hãy bật GPS.");
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <ScrollView style={styles.root} contentContainerStyle={{ padding: 25 }}>

@@ -36,9 +36,12 @@ export default function RescueTasks({ navigation }: any) {
         contentContainerStyle={{ paddingBottom: 40 }}
         refreshControl={<RefreshControl refreshing={loading} onRefresh={fetchTasks} />}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.card} onPress={() => navigation.navigate("RescueTaskDetail", { taskId: item.sos_requests.id })}>
+          <TouchableOpacity 
+            style={styles.card} 
+            onPress={() => navigation.navigate("RescueTaskDetail", { taskId: item.sos_requests.id })} // Đảm bảo key là taskId
+          >
             <View style={styles.cardLeft}>
-              <View style={styles.alertIcon}><MaterialCommunityIcons name="alert-light" size={28} color="#EF4444" /></View>
+              <View style={styles.alertIcon}><MaterialCommunityIcons name="alert" size={28} color="#EF4444" /></View>
               <View style={{ flex: 1 }}>
                 <Text style={styles.type}>{item.sos_requests.emergency_type}</Text>
                 <Text style={styles.address} numberOfLines={2}>{item.sos_requests.address}</Text>
@@ -58,7 +61,7 @@ const styles = StyleSheet.create({
   header: { fontSize: 28, fontWeight: '900', color: '#0F172A' },
   badge: { backgroundColor: '#FF6B35', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 10 },
   badgeText: { color: '#FFF', fontSize: 12, fontWeight: '900' },
-  card: { backgroundColor: '#fff', padding: 20, borderRadius: 30, flexDirection: 'row', alignItems: 'center', marginBottom: 15, elevation: 3, shadowColor: '#000', shadowOpacity: 0.05 },
+  card: { backgroundColor: '#fff', padding: 20, borderRadius: 30, flexDirection: 'row', alignItems: 'center', marginBottom: 15, elevation: 3 },
   cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1, gap: 15 },
   alertIcon: { width: 55, height: 55, borderRadius: 18, backgroundColor: '#FEF2F2', justifyContent: 'center', alignItems: 'center' },
   type: { fontSize: 18, fontWeight: '900', color: '#1E293B' },
